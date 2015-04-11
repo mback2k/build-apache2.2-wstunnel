@@ -1,0 +1,10 @@
+#!/bin/sh
+if mountpoint -q /target; then
+	echo "Installing proxy modules to /target"
+	cp modules/proxy/.libs/mod_proxy*.so /target
+else
+	echo "/target is not a mountpoint."
+	echo "You can either:"
+	echo "- re-run this container with -v /usr/local/lib/apache2/modules:/target"
+	echo "- extract the proxy modules (located at /usr/local/lib/apache2/modules)"
+fi
