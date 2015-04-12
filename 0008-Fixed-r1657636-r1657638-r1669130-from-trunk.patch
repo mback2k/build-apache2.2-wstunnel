@@ -1,0 +1,144 @@
+From 84631687468bc9ec8eb5ff7de0aa740063b7e577 Mon Sep 17 00:00:00 2001
+From: Marc Hoersken <info@marc-hoersken.de>
+Date: Sun, 12 Apr 2015 10:18:34 +0200
+Subject: [PATCH 8/8] Merge r1657636, r1657638, r1669130 from trunk:
+
+mod_proxy_connect/wstunnel: If both client and backend sides get readable
+at the same time, don't lose errors occuring while forwarding on the first
+side when none occurs next on the other side, and abort.
+
+
+CHANGES: Follow up to r1657636, clarify message.
+
+
+mod_proxy_{connect,wstunnel}: follow up to r1657636.
+Since rv is not used as an apr_status_t in the loop (it's logging is done by
+proxy_{connect,wstunnel}_transfer() when necessary/relevent), use a boolean
+instead to avoid the ugly ORs between APR error codes.
+
+Submitted by: ylavic
+Reviewed/backported by: jim
+
+
+git-svn-id: https://svn.apache.org/repos/asf/httpd/httpd/branches/2.4.x@1670324 13f79535-47bb-0310-9956-ffa450edef68
+
+# Conflicts:
+#	CHANGES
+#	modules/proxy/mod_proxy_connect.c
+---
+ modules/proxy/mod_proxy_wstunnel.c | 38 +++++++++++++++++++-------------------
+ 1 file changed, 19 insertions(+), 19 deletions(-)
+
+diff --git a/modules/proxy/mod_proxy_wstunnel.c b/modules/proxy/mod_proxy_wstunnel.c
+index bde1d7e..4f9718b 100644
+--- a/modules/proxy/mod_proxy_wstunnel.c
++++ b/modules/proxy/mod_proxy_wstunnel.c
+@@ -90,10 +90,10 @@ static int proxy_wstunnel_canon(request_rec *r, char *url)
+ }
+ 
+ 
+-static int proxy_wstunnel_transfer(request_rec *r, conn_rec *c_i, conn_rec *c_o,
++static apr_status_t proxy_wstunnel_transfer(request_rec *r, conn_rec *c_i, conn_rec *c_o,
+                                      apr_bucket_brigade *bb, char *name)
+ {
+-    int rv;
++    apr_status_t rv;
+ #ifdef DEBUGGING
+     apr_off_t len;
+ #endif
+@@ -137,7 +137,7 @@ static int proxy_wstunnel_transfer(request_rec *r, conn_rec *c_i, conn_rec *c_o,
+     if (APR_STATUS_IS_EAGAIN(rv)) {
+         rv = APR_SUCCESS;
+     }
+-   
++
+     return rv;
+ }
+ 
+@@ -190,6 +190,7 @@ static int proxy_wstunnel_request(apr_pool_t *p, request_rec *r,
+     char *old_te_val = NULL;
+     apr_bucket_brigade *bb = apr_brigade_create(p, c->bucket_alloc);
+     apr_socket_t *client_socket = ap_get_module_config(c->conn_config, &core_module);
++    int done = 0;
+ 
+     header_brigade = apr_brigade_create(p, backconn->bucket_alloc);
+ 
+@@ -247,9 +248,9 @@ static int proxy_wstunnel_request(apr_pool_t *p, request_rec *r,
+      * nothing else is attempted on the connection after returning. */
+     c->keepalive = AP_CONN_CLOSE;
+ 
+-    while (1) { /* Infinite loop until error (one side closes the connection) */
+-        if ((rv = apr_pollset_poll(pollset, -1, &pollcnt, &signalled))
+-            != APR_SUCCESS) {
++    do { /* Loop until done (one side closes the connection, or an error) */
++        rv = apr_pollset_poll(pollset, -1, &pollcnt, &signalled);
++        if (rv != APR_SUCCESS) {
+             if (APR_STATUS_IS_EINTR(rv)) {
+                 continue;
+             }
+@@ -267,18 +268,19 @@ static int proxy_wstunnel_request(apr_pool_t *p, request_rec *r,
+                 if (pollevent & (APR_POLLIN | APR_POLLHUP)) {
+                     ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "AH02446: "
+                                   "sock was readable");
+-                    rv = proxy_wstunnel_transfer(r, backconn, c, bb, "sock");
++                    done |= proxy_wstunnel_transfer(r, backconn, c, bb,
++                                                    "sock") != APR_SUCCESS;
+                 }
+                 else if (pollevent & APR_POLLERR) {
+-                    rv = APR_EPIPE;
+-                    backconn->aborted = 1;
+                     ap_log_rerror(APLOG_MARK, APLOG_NOTICE, 0, r, "AH02447: "
+                             "error on backconn");
++                    backconn->aborted = 1;
++                    done = 1;
+                 }
+                 else { 
+-                    rv = APR_EGENERAL;
+                     ap_log_rerror(APLOG_MARK, APLOG_NOTICE, 0, r, "AH02605: "
+                             "unknown event on backconn %d", pollevent);
++                    done = 1;
+                 }
+             }
+             else if (cur->desc.s == client_socket) {
+@@ -286,31 +288,29 @@ static int proxy_wstunnel_request(apr_pool_t *p, request_rec *r,
+                 if (pollevent & (APR_POLLIN | APR_POLLHUP)) {
+                     ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "AH02448: "
+                                   "client was readable");
+-                    rv = proxy_wstunnel_transfer(r, c, backconn, bb, "client");
++                    done |= proxy_wstunnel_transfer(r, c, backconn, bb,
++                                                    "client") != APR_SUCCESS;
+                 }
+                 else if (pollevent & APR_POLLERR) {
+-                    rv = APR_EPIPE;
+-                    c->aborted = 1;
+                     ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "AH02607: "
+                             "error on client conn");
++                    c->aborted = 1;
++                    done = 1;
+                 }
+                 else { 
+-                    rv = APR_EGENERAL;
+                     ap_log_rerror(APLOG_MARK, APLOG_NOTICE, 0, r, "AH02606: "
+                             "unknown event on client conn %d", pollevent);
++                    done = 1;
+                 }
+             }
+             else {
+-                rv = APR_EBADF;
+                 ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, r, "AH02449: "
+                               "unknown socket in pollset");
++                done = 1;
+             }
+ 
+         }
+-        if (rv != APR_SUCCESS) {
+-            break;
+-        }
+-    }
++    } while (!done);
+ 
+     ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r,
+                   "finished with poll() - cleaning up");
+-- 
+2.3.5
+

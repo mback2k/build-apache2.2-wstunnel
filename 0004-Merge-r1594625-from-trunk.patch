@@ -1,0 +1,52 @@
+From 023200079ddd50c84dae568ff106dba2951c9ced Mon Sep 17 00:00:00 2001
+From: Marc Hoersken <info@marc-hoersken.de>
+Date: Sun, 12 Apr 2015 10:06:56 +0200
+Subject: [PATCH 4/8] Merge r1594625 from trunk:
+
+mod_proxy_wstunnel: Fix the use of SSL connections with the "wss:" scheme.
+                    PR55320.
+
+Submitted by: Alex Liu <alex.leo.ca gmail.com>
+Committed by: ylavic
+
+Submitted by: ylavic
+Reviewed/backported by: jim
+
+
+git-svn-id: https://svn.apache.org/repos/asf/httpd/httpd/branches/2.4.x@1598603 13f79535-47bb-0310-9956-ffa450edef68
+
+# Conflicts:
+#	CHANGES
+#	STATUS
+---
+ modules/proxy/mod_proxy_wstunnel.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/modules/proxy/mod_proxy_wstunnel.c b/modules/proxy/mod_proxy_wstunnel.c
+index aa008fa..a2172fe 100644
+--- a/modules/proxy/mod_proxy_wstunnel.c
++++ b/modules/proxy/mod_proxy_wstunnel.c
+@@ -332,9 +332,11 @@ static int proxy_wstunnel_handler(request_rec *r, proxy_worker *worker,
+     conn_rec *c = r->connection;
+     apr_pool_t *p = r->pool;
+     apr_uri_t *uri;
++    int is_ssl = 0;
+ 
+     if (strncasecmp(url, "wss:", 4) == 0) {
+         scheme = "WSS";
++        is_ssl = 1;
+     }
+     else if (strncasecmp(url, "ws:", 3) == 0) {
+         scheme = "WS";
+@@ -358,7 +360,7 @@ static int proxy_wstunnel_handler(request_rec *r, proxy_worker *worker,
+         return status;
+     }
+ 
+-    backend->is_ssl = 0;
++    backend->is_ssl = is_ssl;
+     backend->close = 0;
+ 
+     retry = 0;
+-- 
+2.3.5
+

@@ -1,0 +1,36 @@
+From e682017855bbcd31ce64730a3e4f587beb42bda4 Mon Sep 17 00:00:00 2001
+From: Marc Hoersken <info@marc-hoersken.de>
+Date: Sun, 12 Apr 2015 10:16:51 +0200
+Subject: [PATCH 7/8] Merge r1635644 from trunk:
+
+mod_proxy_wstunnel: abort backend connection on polling error to avoid
+further processing (lingering close, SSL shutdown).
+
+Submitted by: ylavic
+Reviewed/backported by: jim
+
+
+git-svn-id: https://svn.apache.org/repos/asf/httpd/httpd/branches/2.4.x@1642856 13f79535-47bb-0310-9956-ffa450edef68
+
+# Conflicts:
+#	CHANGES
+#	STATUS
+---
+ modules/proxy/mod_proxy_wstunnel.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/modules/proxy/mod_proxy_wstunnel.c b/modules/proxy/mod_proxy_wstunnel.c
+index 819864d..bde1d7e 100644
+--- a/modules/proxy/mod_proxy_wstunnel.c
++++ b/modules/proxy/mod_proxy_wstunnel.c
+@@ -271,6 +271,7 @@ static int proxy_wstunnel_request(apr_pool_t *p, request_rec *r,
+                 }
+                 else if (pollevent & APR_POLLERR) {
+                     rv = APR_EPIPE;
++                    backconn->aborted = 1;
+                     ap_log_rerror(APLOG_MARK, APLOG_NOTICE, 0, r, "AH02447: "
+                             "error on backconn");
+                 }
+-- 
+2.3.5
+

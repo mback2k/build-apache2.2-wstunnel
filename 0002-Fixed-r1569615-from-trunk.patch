@@ -1,0 +1,84 @@
+From 10a4b05a9a0d3d1f59d78aa4a62f2812d8a25273 Mon Sep 17 00:00:00 2001
+From: Marc Hoersken <info@marc-hoersken.de>
+Date: Sun, 12 Apr 2015 10:04:56 +0200
+Subject: [PATCH 2/8] Merge r1569615 from trunk:
+
+handle POLLERR/POLLHUP during poll() to avoid high CPU busy loop.
+
+Submitted By: Joffroy Christen <joffroy.christen solvaxis com>, Eric Covener]
+Committed By: covener
+
+
+Submitted by: covener
+Reviewed/backported by: jim
+
+
+git-svn-id: https://svn.apache.org/repos/asf/httpd/httpd/branches/2.4.x@1570321 13f79535-47bb-0310-9956-ffa450edef68
+
+# Conflicts:
+#	CHANGES
+#	STATUS
+---
+ modules/proxy/mod_proxy_wstunnel.c | 23 ++++++++++++++++++++---
+ 1 file changed, 20 insertions(+), 3 deletions(-)
+
+diff --git a/modules/proxy/mod_proxy_wstunnel.c b/modules/proxy/mod_proxy_wstunnel.c
+index 365a205..d17eaff 100644
+--- a/modules/proxy/mod_proxy_wstunnel.c
++++ b/modules/proxy/mod_proxy_wstunnel.c
+@@ -249,7 +249,7 @@ static int ap_proxy_wstunnel_request(apr_pool_t *p, request_rec *r,
+             ap_log_rerror(APLOG_MARK, APLOG_ERR, rv, r, "AH02444: " "error apr_poll()");
+             return HTTP_INTERNAL_SERVER_ERROR;
+         }
+-        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "AH02445: "
++        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "AH02445: "
+                       "woke from poll(), i=%d", pollcnt);
+ 
+         for (pi = 0; pi < pollcnt; pi++) {
+@@ -258,7 +258,7 @@ static int ap_proxy_wstunnel_request(apr_pool_t *p, request_rec *r,
+             if (cur->desc.s == sock) {
+                 pollevent = cur->rtnevents;
+                 if (pollevent & APR_POLLIN) {
+-                    ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "AH02446: "
++                    ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "AH02446: "
+                                   "sock was readable");
+                     rv = proxy_wstunnel_transfer(r, backconn, c, bb, "sock");
+                     }
+@@ -268,16 +268,33 @@ static int ap_proxy_wstunnel_request(apr_pool_t *p, request_rec *r,
+                          ap_log_rerror(APLOG_MARK, APLOG_NOTICE, 0, r, "AH02447: "
+                                        "err/hup on backconn");
+                 }
++                else { 
++                    rv = APR_EGENERAL;
++                    ap_log_rerror(APLOG_MARK, APLOG_NOTICE, 0, r, "AH02605: "
++                            "unknown event on backconn %d", pollevent);
++                }
+                 if (rv != APR_SUCCESS)
+                     client_error = 1;
+             }
+             else if (cur->desc.s == client_socket) {
+                 pollevent = cur->rtnevents;
+                 if (pollevent & APR_POLLIN) {
+-                    ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "AH02448: "
++                    ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "AH02448: "
+                                   "client was readable");
+                     rv = proxy_wstunnel_transfer(r, c, backconn, bb, "client");
+                 }
++                else if ((pollevent & APR_POLLERR)
++                        || (pollevent & APR_POLLHUP)) {
++                    rv = APR_EPIPE;
++                    c->aborted = 1;
++                    ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "AH02607: "
++                            "err/hup on client conn");
++                }
++                else { 
++                    rv = APR_EGENERAL;
++                    ap_log_rerror(APLOG_MARK, APLOG_NOTICE, 0, r, "AH02606: "
++                            "unknown event on client conn %d", pollevent);
++                }
+             }
+             else {
+                 rv = APR_EBADF;
+-- 
+2.3.5
+
