@@ -3,7 +3,7 @@ FROM debian:wheezy
 MAINTAINER Marc Hoersken "info@marc-hoersken.de"
 
 # Based upon https://i.rationa.li/mark/note/2TWATCchRQGyMA0RlvZSQA
-RUN echo "deb-src http://http.debian.net/debian wheezy main" >> /etc/apt/sources.list
+RUN echo "deb-src http://deb.debian.org/debian wheezy main" >> /etc/apt/sources.list
 RUN apt-get update
 RUN apt-get install -y autoconf
 RUN apt-get build-dep -y apache2
